@@ -1,0 +1,221 @@
+create table action(
+	dt string,
+	user_id string,
+	session_id string,
+	page_id string,
+	action_time string,
+	search string,
+	click_category_id string,
+	click_product_id string,
+	order_category_ids string,
+	order_product_ids string,
+	pay_category_ids string,
+	pay_product_ids string,
+	city string
+) row format delimited fields terminated by '_'
+
+-------------------------------------方案1--------------------------------------
+---product_info
+select
+	click_category_id,
+	order_category_ids,
+	pay_category_ids
+from action
+where search=='null'
+
+点击品类id		下单品类ids		支付品类ids
+16				null			null
+-1				15,13,5,11,8	null
+-1				null			15,1,4
+15				null			null
+-1				5,8,2			null
+-1				5,8,11,4		null
+-1				null			1,2,5,4
+
+--统计每个品类的点击次数
+select
+	品类id,count(1) 点击次数
+from product_info where 点击品类id!='-1'
+group by 点击品类id
+
+品类id	点击次数
+16		1		
+15		1		
+
+--统计每个品类的下单次数
+select
+	品类id,count(1) 下单次数
+from product_info later view explode(split(下单品类ids,',')) tmp as 品类id
+where 品类id!='null'
+group by 品类id
+
+品类id	下单次数
+15		1		
+13		1		
+5		3		
+11		2		
+8		3		
+4		1		
+2		1		
+
+--统计每个品类的支付次数
+select
+	品类id,count(1) 支付次数
+from product_info later view explode(split(支付品类ids,',')) tmp as 品类id
+where 品类id!='null'
+group by 品类id
+
+品类id	支付次数
+15		1
+5		1
+1		2
+4		2
+2		1
+
+--以上三个结果join即可得到以下结果
+
+品类id	点击次数	下单次数	支付次数
+16		1			0			0
+15		1			1			1
+13		0			1			0
+5		0			3			1
+11		0			2			0
+8		0			3			0
+1		0			0			2
+4		0			1			2
+2		0			1			1
+
+----------------------------------方案2--------------------------------------
+---过滤、列裁剪 [product_info]
+select
+	click_category_id,
+	order_category_ids,
+	pay_category_ids
+from action
+where search=='null'
+
+点击品类id		下单品类ids		支付品类ids
+16				null			null
+-1				15,13,5,11,8	null
+-1				null			15,1,4
+15				null			null
+-1				5,8,2			null
+-1				5,8,11,4		null
+-1				null			1,2,5,4
+
+---炸开下单ids[click_order_info]
+select
+	点击品类id,下单品类id,支付品类ids
+from product_info later view explode(split(下单品类ids,',')) tmp as 下单品类id
+
+点击品类id		下单品类id		支付品类ids
+16				null			null
+-1				15				null
+-1				13				null
+-1				5				null
+-1				11				null
+-1				8				null
+-1				null			15,1,4
+15				null			null
+-1				5				null
+-1				8				null
+-1				2				null
+-1				5				null
+-1				8				null
+-1				11				null
+-1				4				null
+-1				null			1,2,5,4
+
+----------炸开支付ids【click_order_pay_info】
+select
+	点击品类id,下单品类id,支付品类id
+from click_order_info later view explode(split(支付品类ids,',')) tmp as 支付品类id
+
+点击品类id		下单品类id		支付品类id
+16				null			null
+-1				15				null
+-1				13				null
+-1				5				null
+-1				11				null
+-1				8				null
+-1				null			15
+-1				null			1
+-1				null			4
+15				null			null
+-1				5				null
+-1				8				null
+-1				2				null
+-1				5				null
+-1				8				null
+-1				11				null
+-1				4				null
+-1				null			1
+-1				null			2
+-1				null			5
+-1				null			4
+
+-----三列id合并成一列,并标注行为[product]
+select
+	case when 点击id!='-1' then 点击id
+		 when 支付id!='null' then 支付id
+		 else 下单id
+	end 品类id,
+	case when 点击id!='-1' then 1
+		 else 0
+	end 是否点击,
+	case when 支付id!='null' then 1
+		 else 0
+	end 是否支付,
+	case when 下单id!='null' then 1
+		 else 0
+	end 是否下单
+from click_order_pay_info
+
+
+
+
+品类id	是否点击	是否下单	是否支付
+16		1			0			0
+15		0			1			0
+13		0			1			0
+5		0			1			0
+11		0			1			0
+8		0			1			0
+15		0			0			1
+1		0			0			1
+4		0			0			1
+15		1			0			0
+5		0			1			0
+8		0			1			0
+2		0			1			0
+5		0			1			0
+8		0			1			0
+11		0			1			0
+4		0			1			0
+1		0			0			1
+2		0			0			1
+5		0			0			1
+4		0			0			1
+
+--分组聚合
+select
+	品类id,
+	sum(是否点击) 点击次数,
+	sum(是否下单) 下单次数,
+	sum(是否支付) 支付次数,
+from product
+group by 品类id
+
+
+品类id	点击次数	下单次数	支付次数
+16		1			0			0
+15		1			1			1
+13		0			1			0
+5		0			3			1
+11		0			2			0
+8		0			3			0
+1		0			0			2
+4		0			1			2
+2		0			1			1
+
+
